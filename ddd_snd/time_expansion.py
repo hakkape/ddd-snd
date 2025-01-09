@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 import rustworkx as rx
-from .instance import *
+from .instance import ArcData, Commodity
 from bisect import bisect_left
+
 
 
 def get_edge_index(graph, i, j):
@@ -207,13 +208,17 @@ class DiscretizedGraph(rx.PyDiGraph):
             self._shorten_travel_arcs_unrelaxed(new_node, next_node, time)
 
 
-def create_regular_discretization(n_nodes: int, last_time: int, delta_t: int):
+def create_regular_discretization(n_nodes: int, last_time: int, delta_t: int) -> list[list[int]]:
     node_to_times = [
         [n * delta_t for n in range(last_time // delta_t + 1)] for _ in range(n_nodes)
     ]
     return node_to_times
 
 
-def create_relaxed_initial_discretization(n_nodes: int, last_time: int):
-    node_to_times = [[0, last_time] for _ in range(n_nodes)]
+def create_relaxed_initial_discretization(n_nodes: int, coms: list[Commodity]) ->list[list[int]]:
+    node_times = {n: set(0) for n in range(n_nodes)}
+    for com in coms:
+        node_times[com.source_node].add(com.release)
+        node_times[com.sink_node].add(com.deadline)
+    node_to_times = [sorted(list(node_times[n])) for n in range(n_nodes)]
     return node_to_times
