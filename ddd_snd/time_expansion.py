@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, InitVar
 import rustworkx as rx
-from .instance import ArcData, Commodity
+from .instance import ArcData, Commodity, NodeData
 from bisect import bisect_left
 
 
@@ -17,25 +17,37 @@ def get_edge_index(graph, i, j):
 
 @dataclass
 class TimeNodeData:
-    id: int
-    flat_id: int
+    flat_node: int
     time: int
+    name: str = field(init=False)
+    flat_node_data: InitVar[NodeData] # only used to initialize this dataclass
+    
+    def __post_init__(self, flat_node_data: NodeData):
+        self.name = f"{flat_node_data.name}_{self.time}"
 
 
 class DiscretizedGraph(rx.PyDiGraph):
-    def __init__(
-        self, graph: rx.PyDiGraph, node_to_times: list[list[int]], relaxed: bool
+    # for some god-forsaken reason using the rustworkx interface we can not easily inherit from the PyDiGraph class
+    # instead we could use composition or use this workaround using __new__ instead of __init__, see here
+    # https://stackoverflow.com/questions/78593608/subclass-super-init-args-kwargs-not-working-says-object-init-t
+    def __new__(
+        cls, graph: rx.PyDiGraph, node_to_times: list[list[int]], relaxed: bool
     ):
-        super().__init__()
-        self.node_to_times: list[list[int]] = node_to_times
-        self.flat_to_expanded_nodes: dict[int, list[int]] = {}
-        self.flat_to_expanded_arcs: dict[int, list[int]] = {}
-        self.g_flat: rx.PyDiGraph = graph
-        self.relaxed = relaxed
-        if self.relaxed:
-            self._create_relaxed_time_expanded_graph()
-        else:
-            self._create_time_expanded_graph()
+        new_graph = rx.PyDiGraph.__new__(cls)
+        new_graph.node_to_times = node_to_times
+        new_graph.flat_to_expanded_nodes = {}
+        new_graph.flat_to_expanded_arcs = {}
+        new_graph.g_flat = graph
+        new_graph.relaxed = relaxed
+        new_graph._create_time_expanded_graph()
+        return new_graph
+    
+    # workaround to get IDs of ingoing and outgoing edges, not something that PyDiGraph provides
+    def get_out_edge_indices(self, node: int):
+        return self.incident_edges(node)
+    def get_in_edge_indices(self, node: int):
+        all_incident_edges = self.incident_edges(node, all_edges=True)
+        return [edge for edge in all_incident_edges if edge[1] == node]
 
     def _add_timed_nodes(self):
         # add node for each timepoint
@@ -43,9 +55,8 @@ class DiscretizedGraph(rx.PyDiGraph):
             self.flat_to_expanded_nodes[node] = []
             for time in self.node_to_times[node]:
                 id_ex = self.add_node(
-                    TimeNodeData(id=0, flat_id=self.g_flat[node].id, time=time)
+                    TimeNodeData(flat_node = node, time = time, flat_node_data = self.g_flat[node])
                 )
-                self[id_ex].id = id_ex
                 self.flat_to_expanded_nodes[node].append(id_ex)
 
     def _add_holding_arcs(self):
@@ -96,6 +107,9 @@ class DiscretizedGraph(rx.PyDiGraph):
                         != start_time + travel_time
                     ):
                         offset = 1
+                        # in this case, we might outside the time horizon, in which case we do not add the arc
+                        if end_node_index + offset >= len(potential_end_nodes):
+                            continue
 
                 # add arc between start and end node
                 end_node = potential_end_nodes[end_node_index + offset]
@@ -106,7 +120,7 @@ class DiscretizedGraph(rx.PyDiGraph):
     def _create_time_expanded_graph(self):
         self._add_timed_nodes()
         self._add_holding_arcs()
-        self._add_relaxed_travel_arcs()
+        self._add_travel_arcs()
 
     def _shorten_travel_arcs_unrelaxed(self, new_node: int, next_node: int, time: int):
         # shorten ingoing travel arcs of after node
@@ -196,7 +210,7 @@ class DiscretizedGraph(rx.PyDiGraph):
         # update the graph
         # add new node
         new_node = self.add_node(
-            TimeNodeData(id=0, flat_id=flat_node, time=time)
+            TimeNodeData(flat_node=flat_node, time=time, flat_node_data=self.g_flat[flat_node])
         )  # to graph
         self.flat_to_expanded_nodes[flat_node].insert(k_new, new_node)  # to mapping
         # update arcs

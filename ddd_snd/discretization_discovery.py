@@ -47,7 +47,7 @@ def add_shorten_variables(
             )
 
 
-def getCommodityNodePaths(sol: Solution, coms: list[Commodity]) -> list[list[int]]:
+def get_commodity_node_paths(sol: Solution, coms: list[Commodity]) -> list[list[int]]:
     commodity_node_paths = []
     for com in coms:
         visited_nodes = [
@@ -74,41 +74,66 @@ def add_linking_constraints(
             m.addConstr(
                 duration[com.idx, node] >= real_travel_time(1 - shorten[com.idx, node])
             )
-            
-def add_time_consistency_constraints(m: Model, sol: Solution, dispatch: dict[tuple[int, int], Var], duration: dict[tuple[int, int], Var], com_node_paths: list[list[int]], coms: list[Commodity]):
+
+
+def add_time_consistency_constraints(
+    m: Model,
+    sol: Solution,
+    dispatch: dict[tuple[int, int], Var],
+    duration: dict[tuple[int, int], Var],
+    com_node_paths: list[list[int]],
+    coms: list[Commodity],
+):
     # (7) in Boland et al.
     for com in coms:
         for n_arc, node in enumerate(com_node_paths[com.id][:-1]):
             m.addConstr(
-                dispatch[com.idx, node] + duration[com.idx, node] <= dispatch[com.idx, com_node_paths[com.id][n_arc + 1]]
+                dispatch[com.idx, node] + duration[com.idx, node]
+                <= dispatch[com.idx, com_node_paths[com.id][n_arc + 1]]
             )
-            
-def add_time_window_constraints(m: Model, sol: Solution, dispatch: dict[tuple[int, int], Var], duration: dict[tuple[int,int],Var], coms: list[Commodity], com_node_paths: list[list[int]]):
+
+
+def add_time_window_constraints(
+    m: Model,
+    sol: Solution,
+    dispatch: dict[tuple[int, int], Var],
+    duration: dict[tuple[int, int], Var],
+    coms: list[Commodity],
+    com_node_paths: list[list[int]],
+):
     # (8, 9) in Boland et al.
     for com in coms:
-        m.addConstr(
-            dispatch[com.idx, com.source_node] >= com.release
-        )
+        m.addConstr(dispatch[com.idx, com.source_node] >= com.release)
         second_to_last_node = com_node_paths[com.id][-2]
         m.addConstr(
-            dispatch[com.idx, second_to_last_node] + duration[com.idx, second_to_last_node] <= com.deadline
+            dispatch[com.idx, second_to_last_node]
+            + duration[com.idx, second_to_last_node]
+            <= com.deadline
         )
 
 
-def add_dispatch_linking_constraints(m: Model, dispatch: dict[tuple[int, int], Var], com_node_paths: list[list[int]], sol: Solution, coms: list[Commodity]):
+def add_dispatch_linking_constraints(
+    m: Model,
+    dispatch: dict[tuple[int, int], Var],
+    com_node_paths: list[list[int]],
+    sol: Solution,
+    coms: list[Commodity],
+):
     # (10) in Boland et al.
     # TODO: since we link all of these variables, we might as well directly replace them with a variable for service dispatch times
-    for com in coms:
-        for n_arc, node in enumerate(com_node_paths[com.id][:-1]):
-            m.addConstr(
-                dispatch[com.idx, node] == sol.commodity_paths[com.id].services[n_arc].start_time
-            )
+    for service in sol.services:
+        node = service.start_node
+        if len(service.commodities_transported) < 2:
+            continue
+        for com1 in service.commodities_transported:
+            for com2 in service.commodities_transported:
+                if com1.id < com2.id:
+                    m.addConstr(dispatch[com1.idx, node] == dispatch[com2.idx, node])
 
 
-
-def setupIdentifcationModel(sol: Solution, instance: Instance):
-    m = Model("Identification")
-    com_node_paths = getCommodityNodePaths(sol, instance.commodities)
+def setup_identification_model(sol: Solution, instance: Instance):
+    m = Model("Identxification")
+    com_node_paths = get_commodity_node_paths(sol, instance.commodities)
 
     # variables
     dispatch = add_dispatch_variables(m, sol, instance.commodities, com_node_paths)
@@ -118,15 +143,41 @@ def setupIdentifcationModel(sol: Solution, instance: Instance):
     # constraints
     add_linking_constraints(m, dispatch, duration, shorten, com_node_paths)
     add_time_consistency_constraints(m, dispatch, duration, com_node_paths)
-    add_time_window_constraints(m, dispatch, duration, instance.commodities, com_node_paths)
-    add_dispatch_linking_constraints(m, dispatch, com_node_paths, sol, instance.commodities)
+    add_time_window_constraints(
+        m, dispatch, duration, instance.commodities, com_node_paths
+    )
+    add_dispatch_linking_constraints(
+        m, dispatch, com_node_paths, sol, instance.commodities
+    )
     return m, dispatch, duration, shorten
 
 
-def identifyTooShortArcs(sol: Solution):
-    m, dispatch, duration, shorten = setupIdentifcationModel(sol)
-    m.optimize()
-    shortened_arcs = []
+def update_timed_services(sol: Solution, dispatch: dict[tuple[int, int], Var]):
+    # given a solution that can be implemented, update the start and end times of the services
+    for service in sol.services:
+        # get any commodity on that service and get its dispatch time: this is the start time
+        # arrival time is then start time + travel time
+        com = service.commodities_transported[0]
+        start_node = service.start_node
+        service.start_time = dispatch[com.idx, start_node].x
+        service.end_time = service.start_time + service.travel_time
+
+
+def find_nodes_to_insert(sol: Solution, shorten: dict[tuple[int, int], Var]) -> list[tuple[int, int]]:
+    # if we have an arc ((i,t),(j,t')) that is too short, we need to add a new node (j, t+t_{ij})
+    # set, in case we have multiple arcs that would result in the same split
+    nodes_to_insert = set()
+    
     for (com, node), var in shorten.items():
         if var.x > 0.5:
-            shortened_arcs.append((com, node))
+            # find service that starts at this node
+            for service in sol.commodity_paths[com.id].services:
+                found = False
+                if service.start_node == node:
+                    # add new node to set
+                    nodes_to_insert.add((service.end_node, service.start_time + service.travel_time))
+                    found = True
+                    break
+                assert(found, "Can not identify service that needs to be split")
+
+    return list(nodes_to_insert)

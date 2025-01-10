@@ -7,11 +7,13 @@ from bisect import bisect_left
 
 def add_design_variables(m: Model, g: DiscretizedGraph)-> dict[int, Var]:
     y = {}
-    for flat_arc in DiscretizedGraph.g_flat.edge_indices():
-        fixed_cost = DiscretizedGraph.g_flat[flat_arc].fixed_cost
-        for expanded_arc in DiscretizedGraph.flat_to_expanded_arcs[flat_arc]:
+    for flat_arc in g.g_flat.edge_indices():
+        fixed_cost = g.g_flat.get_edge_data_by_index(flat_arc).fixed_cost
+        for expanded_arc in g.flat_to_expanded_arcs[flat_arc]:
+            i, j = g.get_edge_endpoints_by_index(expanded_arc)
+            
             y[expanded_arc] = m.addVar(
-                vtype=GRB.INTEGER, name=f"x_{expanded_arc}", obj=fixed_cost
+                vtype=GRB.INTEGER, name=f"x_({g[i].name})_({g[j].name})", obj=fixed_cost
             )
 
     return y
@@ -19,11 +21,12 @@ def add_design_variables(m: Model, g: DiscretizedGraph)-> dict[int, Var]:
 
 def add_flow_variables(m: Model, coms: list[Commodity], g: DiscretizedGraph) -> dict[tuple[int, int], Var]:
     x = {}
-    for arc in DiscretizedGraph.edge_indices():
+    for arc in g.edge_indices():
         flow_cost = g.get_edge_data_by_index(arc).flow_cost
+        i, j = g.get_edge_endpoints_by_index(arc)
         for com in coms:
             x[arc, com.id] = m.addVar(
-                vtype=GRB.BINARY, name=f"x_{arc}_{com}", obj=flow_cost * com.quantity
+                vtype=GRB.BINARY, name=f"x_({g[i].name})_({g[j].name})_{com}", obj=flow_cost * com.quantity
             )
 
     return x
@@ -45,8 +48,8 @@ def add_flow_conservation_constraints(
             elif node == sink_node:
                 rhs = -1
             m.addConstr(
-                quicksum(x[arc, com.id] for arc in g.out_edges(node))
-                - quicksum(x[arc, com.id] for arc in g.in_edges(node))
+                quicksum(x[arc, com.id] for arc in g.get_out_edge_indices(node))
+                - quicksum(x[arc, com.id] for arc in g.get_in_edge_indices(node))
                 == rhs
             )
 
@@ -67,7 +70,7 @@ def build_snd_model(instance: Instance, g: DiscretizedGraph):
     m = Model("snd")
 
     # variables
-    x = add_flow_variables(m, g)
+    x = add_flow_variables(m, instance.commodities, g)
     y = add_design_variables(m, g)
 
     # constraints
@@ -77,7 +80,7 @@ def build_snd_model(instance: Instance, g: DiscretizedGraph):
     return m, x, y
 
 
-def getSolution(m: Model, x: dict, y: dict, coms: list[Commodity], g: DiscretizedGraph):
+def get_solution(m: Model, x: dict, y: dict, coms: list[Commodity], g: DiscretizedGraph):
     # check that optimal solution found
     if m.status != GRB.OPTIMAL:
         raise Exception("Optimization was stopped with status " + str(m.status))
@@ -145,6 +148,7 @@ def getSolution(m: Model, x: dict, y: dict, coms: list[Commodity], g: Discretize
                 raise Exception("Could not construct service")
         commodity_paths[com.id].services = services_sorted
 
+    assert(total_flow_cost + total_fixed_cost == m.objVal, "Gurobi obj does not match sum of flow and fixed costs")
     return Solution(
         services=services,
         commodity_paths=commodity_paths,
