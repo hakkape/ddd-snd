@@ -10,9 +10,9 @@ def add_dispatch_variables(
     dispatch = {}
     for com in coms:
         # we skip the last node, since we do not need to dispatch there
-        for node in com_node_paths[com.id][:-1]:
-            dispatch[com.idx, node] = m.addVar(
-                vtype=GRB.CONTINUOUS, name=f"gamma_{com}_{node}"
+        for k in range(len(com_node_paths[com.id]) - 1):
+            dispatch[com.id, k] = m.addVar(
+                vtype=GRB.CONTINUOUS, name=f"gamma_{com.id}_{k}_n{com_node_paths[com.id][k]}"
             )
     return dispatch
 
@@ -23,13 +23,15 @@ def add_duration_variables(
     # variables that track the time that each commodity travels between each pair of nodes (theta in Boland et al., here we identify the arcs by their origin node since the destination is clear)
     duration = {}
     for com in coms:
-        for n_arc, node in enumerate(com_node_paths[com.id][:-1]):
+        for k, node in enumerate(com_node_paths[com.id][:-1]):
             relaxed_travel_time = (
-                sol.commodity_paths[com.id].services[n_arc].end_time
-                - sol.commodity_paths[com.id].services[n_arc].start_time
+                sol.commodity_paths[com.id].services[k].end_time
+                - sol.commodity_paths[com.id].services[k].start_time
             )
-            duration[com.idx, node] = m.addVar(
-                vtype=GRB.CONTINUOUS, name=f"theta_{com}_{node}", lb=relaxed_travel_time
+            duration[com.id, k] = m.addVar(
+                vtype=GRB.CONTINUOUS,
+                name=f"theta_{com.id}_{k}_n{node}",
+                lb=relaxed_travel_time,
             )
 
     return duration
@@ -41,10 +43,11 @@ def add_shorten_variables(
     # binary variables to track if a service needs to be shortened (sigma in Boland et al., here we identify the arcs by their origin node since the destination is clear)
     shorten = {}
     for com in coms:
-        for node in com_node_paths[com.id][:-1]:
-            shorten[com.idx, node] = m.addVar(
-                vtype=GRB.BINARY, name=f"sigma_{com}_{node}", obj=1
+        for k, node in enumerate(com_node_paths[com.id][:-1]):
+            shorten[com.id, k] = m.addVar(
+                vtype=GRB.BINARY, name=f"sigma_{com.id}_{k}_n{node}", obj=1
             )
+    return shorten
 
 
 def get_commodity_node_paths(sol: Solution, coms: list[Commodity]) -> list[list[int]]:
@@ -53,7 +56,7 @@ def get_commodity_node_paths(sol: Solution, coms: list[Commodity]) -> list[list[
         visited_nodes = [
             service.start_node for service in sol.commodity_paths[com.id].services
         ]
-        visited_nodes.add(com.sink_node)
+        visited_nodes.append(com.sink_node)
         commodity_node_paths.append(list(visited_nodes))
 
     return commodity_node_paths
@@ -69,10 +72,13 @@ def add_linking_constraints(
 ):
     # (6) in Boland et al.
     for com in coms:
-        for n_arc, node in enumerate(com_node_paths[com.id][:-1]):
-            real_travel_time = sol.commodity_paths[com.id].services[n_arc].travel_time
+        for k, node in enumerate(com_node_paths[com.id][:-1]):
+            real_travel_time = sol.commodity_paths[com.id].services[k].travel_time
+            lb = duration[com.id, k].lb
             m.addConstr(
-                duration[com.idx, node] >= real_travel_time(1 - shorten[com.idx, node])
+                duration[com.id, k]
+                >= real_travel_time - (real_travel_time - lb) * shorten[com.id, k],
+                name=f"link_{com.id}_{k}_n{node}",
             )
 
 
@@ -86,10 +92,11 @@ def add_time_consistency_constraints(
 ):
     # (7) in Boland et al.
     for com in coms:
-        for n_arc, node in enumerate(com_node_paths[com.id][:-1]):
+        for k, node in enumerate(com_node_paths[com.id][:-2]):
             m.addConstr(
-                dispatch[com.idx, node] + duration[com.idx, node]
-                <= dispatch[com.idx, com_node_paths[com.id][n_arc + 1]]
+                dispatch[com.id, k] + duration[com.id, k]
+                <= dispatch[com.id, k + 1],
+                name=f"time_consistency_{com.id}_{k}_n{node}",
             )
 
 
@@ -103,12 +110,15 @@ def add_time_window_constraints(
 ):
     # (8, 9) in Boland et al.
     for com in coms:
-        m.addConstr(dispatch[com.idx, com.source_node] >= com.release)
-        second_to_last_node = com_node_paths[com.id][-2]
         m.addConstr(
-            dispatch[com.idx, second_to_last_node]
-            + duration[com.idx, second_to_last_node]
-            <= com.deadline
+            dispatch[com.id, 0] >= com.release, name=f"release_{com.id}"
+        )
+        second_to_last_k = len(com_node_paths[com.id]) - 2
+        m.addConstr(
+            dispatch[com.id, second_to_last_k]
+            + duration[com.id, second_to_last_k]
+            <= com.deadline,
+            name=f"deadline_{com.id}",
         )
 
 
@@ -126,9 +136,14 @@ def add_dispatch_linking_constraints(
         if len(service.commodities_transported) < 2:
             continue
         for com1 in service.commodities_transported:
+            k1 = sol.commodity_paths[com1.id].services.index(service)
             for com2 in service.commodities_transported:
+                k2 = sol.commodity_paths[com2.id].services.index(service)
                 if com1.id < com2.id:
-                    m.addConstr(dispatch[com1.idx, node] == dispatch[com2.idx, node])
+                    m.addConstr(
+                        dispatch[com1.id, k1] == dispatch[com2.id, k2],
+                        name=f"dispatch_link_{com1.id}_{com2.id}_{node}",
+                    )
 
 
 def setup_identification_model(sol: Solution, instance: Instance):
@@ -139,12 +154,17 @@ def setup_identification_model(sol: Solution, instance: Instance):
     dispatch = add_dispatch_variables(m, sol, instance.commodities, com_node_paths)
     duration = add_duration_variables(m, sol, instance.commodities, com_node_paths)
     shorten = add_shorten_variables(m, sol, instance.commodities, com_node_paths)
+    m.update()  # necessary because we access the variables lower bounds before the model gets updated (when solving)
 
     # constraints
-    add_linking_constraints(m, dispatch, duration, shorten, com_node_paths)
-    add_time_consistency_constraints(m, dispatch, duration, com_node_paths)
+    add_linking_constraints(
+        m, sol, duration, shorten, com_node_paths, instance.commodities
+    )
+    add_time_consistency_constraints(
+        m, sol, dispatch, duration, com_node_paths, instance.commodities
+    )
     add_time_window_constraints(
-        m, dispatch, duration, instance.commodities, com_node_paths
+        m, sol, dispatch, duration, instance.commodities, com_node_paths
     )
     add_dispatch_linking_constraints(
         m, dispatch, com_node_paths, sol, instance.commodities
@@ -159,25 +179,23 @@ def update_timed_services(sol: Solution, dispatch: dict[tuple[int, int], Var]):
         # arrival time is then start time + travel time
         com = service.commodities_transported[0]
         start_node = service.start_node
-        service.start_time = dispatch[com.idx, start_node].x
+        k = sol.commodity_paths[com.id].services.index(service)
+        service.start_time = dispatch[com.id, k].x
         service.end_time = service.start_time + service.travel_time
 
 
-def find_nodes_to_insert(sol: Solution, shorten: dict[tuple[int, int], Var]) -> list[tuple[int, int]]:
+def find_nodes_to_insert(
+    sol: Solution, shorten: dict[tuple[int, int], Var]
+) -> list[tuple[int, int]]:
     # if we have an arc ((i,t),(j,t')) that is too short, we need to add a new node (j, t+t_{ij})
     # set, in case we have multiple arcs that would result in the same split
     nodes_to_insert = set()
-    
-    for (com, node), var in shorten.items():
+
+    for (com_id, k), var in shorten.items():
         if var.x > 0.5:
-            # find service that starts at this node
-            for service in sol.commodity_paths[com.id].services:
-                found = False
-                if service.start_node == node:
-                    # add new node to set
-                    nodes_to_insert.add((service.end_node, service.start_time + service.travel_time))
-                    found = True
-                    break
-                assert(found, "Can not identify service that needs to be split")
+            service = sol.commodity_paths[com_id].services[k]
+            node = service.end_node
+            time = service.start_time + service.travel_time
+            nodes_to_insert.add((node, time))
 
     return list(nodes_to_insert)

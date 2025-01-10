@@ -24,11 +24,12 @@ def solve_snd(ins: Instance, delta_t: int) -> Solution:
     m, x, y = build_snd_model(ins, g_disc)
     m.optimize()
     sol = get_solution(m, x, y, ins.commodities, g_disc)
+    print(f"nodes in discretization: {g_disc.num_nodes()}")
 
 
 def solve_csnd(ins: Instance) -> Solution:
     # create initial discretized graph
-    n_nodes_flat = ins.flat_graph.number_of_nodes()
+    n_nodes_flat = ins.flat_graph.num_nodes()
     g_disc = DiscretizedGraph(
         ins.flat_graph,
         create_relaxed_initial_discretization(n_nodes_flat, ins.commodities),
@@ -37,16 +38,24 @@ def solve_csnd(ins: Instance) -> Solution:
 
     lb = -10e100
     ub = 10e100
+    iteration = 0
     while True:
         # solve model for current discretization
         m, x, y = build_snd_model(ins, g_disc)
+        m.setParam('OutputFlag', 0)
         m.optimize()
         sol = get_solution(m, x, y, ins.commodities, g_disc)
         lb = max(sol.total_cost, lb)
 
         # run model to identify arcs that need to be fixed
         m_fix, dispatch, duration, shorten = setup_identification_model(sol, ins)
+        m_fix.setParam('OutputFlag', 0)
         m_fix.optimize()
+
+        # status update 
+        iteration += 1
+        print(f"iteration {iteration}: lower bound: {lb}, conflicts: {m_fix.objVal}, nodes in discretization: {g_disc.num_nodes()}")
+
         # if no problems, we are done:
         if m_fix.objVal == 0:
             update_timed_services(sol, dispatch)
@@ -58,6 +67,8 @@ def solve_csnd(ins: Instance) -> Solution:
 
         # identify arcs that need to be split, adjust discretization, repeat
         nodes_to_insert = find_nodes_to_insert(sol, shorten)
+
         # update discretization
         for node, time in nodes_to_insert:
             g_disc.refine_discretization(node, time)
+        
