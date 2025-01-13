@@ -11,9 +11,10 @@ from .discretization_discovery import (
     update_timed_services,
     find_nodes_to_insert,
 )
+from gurobipy import GRB
 
 
-def solve_snd(ins: Instance, delta_t: int) -> Solution:
+def solve_snd(ins: Instance, delta_t: int) -> Solution | None:
     n_nodes_flat = ins.flat_graph.num_nodes()
     time_horizon = max(com.deadline for com in ins.commodities)
     g_disc = DiscretizedGraph(
@@ -23,11 +24,12 @@ def solve_snd(ins: Instance, delta_t: int) -> Solution:
     )
     m, x, y = build_snd_model(ins, g_disc)
     m.optimize()
-    sol = get_solution(m, x, y, ins.commodities, g_disc)
     print(f"nodes in discretization: {g_disc.num_nodes()}")
+    if m.status == GRB.INFEASIBLE:
+        return None
+    return get_solution(m, x, y, ins.commodities, g_disc)
 
-
-def solve_csnd(ins: Instance) -> Solution:
+def solve_csnd(ins: Instance) -> Solution | None:
     # create initial discretized graph
     n_nodes_flat = ins.flat_graph.num_nodes()
     g_disc = DiscretizedGraph(
@@ -39,11 +41,14 @@ def solve_csnd(ins: Instance) -> Solution:
     lb = -10e100
     ub = 10e100
     iteration = 0
+    
     while True:
         # solve model for current discretization
         m, x, y = build_snd_model(ins, g_disc)
         m.setParam('OutputFlag', 0)
         m.optimize()
+        if m.status == GRB.INFEASIBLE:
+            return None
         sol = get_solution(m, x, y, ins.commodities, g_disc)
         lb = max(sol.total_cost, lb)
 
