@@ -1,5 +1,5 @@
 # Dynamic Discretization Discovery for Service Network Design
-An implementation of the algorithm by Boland et al. 2017 "The Continuous-Time Service Network Design Problem".
+An implementation of the algorithm by Boland et al. 2017 ["The Continuous-Time Service Network Design Problem"](https://doi.org/10.1287/opre.2017.1624).
 
 # Installation
 Works on `Python 3.12.2`. Needs a `Gurobi` license installed.
