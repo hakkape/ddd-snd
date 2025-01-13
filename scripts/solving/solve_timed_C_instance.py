@@ -10,10 +10,12 @@ from ddd_snd.solver import solve_csnd, solve_snd
 # Define here the functionality of the script
 def main(instance_path: Path, delta_t: float, full_model: bool):
     ins = read_modified_dow_instance(instance_path, delta_t)
+    sol = None
     if full_model:
-        sol = solve_snd(ins, 1) 
+        sol = solve_snd(ins, 1)
     else:
         sol = solve_csnd(ins)
+    sol.print()
 
 
 if __name__ == "__main__":
