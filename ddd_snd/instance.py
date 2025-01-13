@@ -31,7 +31,6 @@ class Commodity:
 class Instance:
     flat_graph: rx.PyDiGraph
     commodities: list[Commodity]
-    
 
 
 def read_modified_dow_instance(path: Path, delta_t: float) -> Instance:
@@ -41,12 +40,18 @@ def read_modified_dow_instance(path: Path, delta_t: float) -> Instance:
         lines = f.readlines()
     n_nodes, n_arcs, n_commodities = map(int, lines[1].split())
     flat_graph = rx.PyDiGraph()
-    for i in range(1, n_nodes+1):
-        flat_graph.add_node(NodeData(name = i))
+    for i in range(1, n_nodes + 1):
+        flat_graph.add_node(NodeData(name=i))
     for i, line in enumerate(lines[2 : n_arcs + 2]):
-        i, j, flow_cost, capacity, fixed_cost, travel_time = map(float, line.split()[:6])
+        i, j, flow_cost, capacity, fixed_cost, travel_time = map(
+            float, line.split()[:6]
+        )
         travel_time = ceil(travel_time / delta_t)
-        flat_graph.add_edge(int(i) - 1, int(j) - 1, ArcData(travel_time, flow_cost, fixed_cost, capacity))
+        flat_graph.add_edge(
+            int(i) - 1,
+            int(j) - 1,
+            ArcData(travel_time, flow_cost, fixed_cost, capacity),
+        )
     commodities = []
     for line in lines[n_arcs + 2 :]:
         source_node, sink_node, quantity, release, deadline = line.split()[:5]
@@ -55,5 +60,9 @@ def read_modified_dow_instance(path: Path, delta_t: float) -> Instance:
         quantity = float(quantity)
         release = ceil(float(release) / delta_t)
         deadline = floor(float(deadline) / delta_t)
-        commodities.append(Commodity(len(commodities), source_node, sink_node, quantity, release, deadline))
+        commodities.append(
+            Commodity(
+                len(commodities), source_node, sink_node, quantity, release, deadline
+            )
+        )
     return Instance(flat_graph, commodities)
