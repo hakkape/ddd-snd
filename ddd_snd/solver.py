@@ -12,11 +12,14 @@ from .discretization_discovery import (
     find_nodes_to_insert,
 )
 from gurobipy import GRB
+from math import ceil
 
 
 def solve_snd(ins: Instance, delta_t: int) -> Solution | None:
     n_nodes_flat = ins.flat_graph.num_nodes()
-    time_horizon = max(com.deadline for com in ins.commodities)
+    time_horizon = max(
+        ceil(com.deadline / delta_t) * delta_t for com in ins.commodities
+    )
     g_disc = DiscretizedGraph(
         ins.flat_graph,
         create_regular_discretization(n_nodes_flat, time_horizon, delta_t),
@@ -28,6 +31,7 @@ def solve_snd(ins: Instance, delta_t: int) -> Solution | None:
     if m.status == GRB.INFEASIBLE:
         return None
     return get_solution(m, x, y, ins.commodities, g_disc)
+
 
 def solve_csnd(ins: Instance) -> Solution | None:
     # create initial discretized graph
@@ -41,11 +45,11 @@ def solve_csnd(ins: Instance) -> Solution | None:
     lb = -10e100
     ub = 10e100
     iteration = 0
-    
+
     while True:
         # solve model for current discretization
         m, x, y = build_snd_model(ins, g_disc)
-        m.setParam('OutputFlag', 0)
+        m.setParam("OutputFlag", 0)
         m.optimize()
         if m.status == GRB.INFEASIBLE:
             return None
@@ -54,12 +58,14 @@ def solve_csnd(ins: Instance) -> Solution | None:
 
         # run model to identify arcs that need to be fixed
         m_fix, dispatch, duration, shorten = setup_identification_model(sol, ins)
-        m_fix.setParam('OutputFlag', 0)
+        m_fix.setParam("OutputFlag", 0)
         m_fix.optimize()
 
-        # status update 
+        # status update
         iteration += 1
-        print(f"iteration {iteration}: lower bound: {lb}, conflicts: {m_fix.objVal}, nodes in discretization: {g_disc.num_nodes()}")
+        print(
+            f"iteration {iteration}: lower bound: {lb}, conflicts: {m_fix.objVal}, nodes in discretization: {g_disc.num_nodes()}"
+        )
 
         # if no problems, we are done:
         if m_fix.objVal == 0:
@@ -76,4 +82,3 @@ def solve_csnd(ins: Instance) -> Solution | None:
         # update discretization
         for node, time in nodes_to_insert:
             g_disc.refine_discretization(node, time)
-        

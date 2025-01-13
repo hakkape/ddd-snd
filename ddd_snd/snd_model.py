@@ -131,6 +131,7 @@ def get_solution(
             start_node=g[i].flat_node,
             end_node=g[j].flat_node,
             travel_time=arc_data.travel_time,
+            n_vehicles=val,
             cost=service_cost,
             capacity=val * arc_data.capacity,
             commodities_transported=commodities_transported,
