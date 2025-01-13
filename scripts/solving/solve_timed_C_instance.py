@@ -46,7 +46,8 @@ if __name__ == "__main__":
     instance_number = parser.parse_args().number
     delta_t = parser.parse_args().delta_t
     full_model = parser.parse_args().f
-    instance_path = Path(f"../../instances/C_timed/c{instance_number}.dow")
+    top_level_path = Path(__file__).parent.parent
+    instance_path = top_level_path / f"instances/C_timed/c{instance_number}.dow"
 
     # -- Calling main function --
     main(instance_path, delta_t, full_model)
