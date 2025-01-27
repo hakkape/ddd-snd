@@ -71,6 +71,20 @@ def add_capacity_constraints(
             m.addConstr(flow <= capacity, name=f"capacity_{arc}")
 
 
+def add_travel_time_limit(
+    m: Model, x: dict, coms: list[Commodity], g: DiscretizedGraph
+):
+    # for each commodity, the sum of travel times must not exceed the time limit
+    for com in coms:
+        travel_time = quicksum(
+            g.get_edge_data_by_index(arc).travel_time * x[arc, com.id]
+            for arc in g.edge_indices()
+        )
+        m.addConstr(
+            travel_time <= com.deadline - com.release, name=f"travel_time_{com.id}"
+        )
+
+
 def build_snd_model(instance: Instance, g: DiscretizedGraph):
     m = Model("snd")
 
@@ -81,6 +95,9 @@ def build_snd_model(instance: Instance, g: DiscretizedGraph):
     # constraints
     add_flow_conservation_constraints(m, x, instance.commodities, g)
     add_capacity_constraints(m, x, y, instance.commodities, g)
+
+    # valid inequality
+    add_travel_time_limit(m, x, instance.commodities, g)
 
     return m, x, y
 
