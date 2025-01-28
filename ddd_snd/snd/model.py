@@ -1,6 +1,6 @@
 from .time_expansion import DiscretizedGraph, TimeNodeData
-from .instance import Instance, Commodity
-from .solution import TimedService, CommodityPath, Solution
+from ..instance import Instance, Commodity
+from ..solution import TimedService, CommodityPath, Solution
 from gurobipy import Model, GRB, quicksum, Var
 from bisect import bisect_left
 

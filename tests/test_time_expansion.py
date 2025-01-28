@@ -1,4 +1,4 @@
-from ddd_snd.time_expansion import (
+from ddd_snd.snd.time_expansion import (
     create_regular_discretization,
     create_relaxed_initial_discretization,
     get_edge_index,

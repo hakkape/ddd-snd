@@ -1,4 +1,4 @@
-from ddd_snd.solver import solve_snd, solve_csnd
+from ddd_snd.snd.solver import solve_snd, solve_csnd
 from ddd_snd.solution import Solution
 import pytest
 

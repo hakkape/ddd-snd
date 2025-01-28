@@ -1,5 +1,5 @@
 from ddd_snd.instance import Instance, Commodity, ArcData, NodeData
-from ddd_snd.time_expansion import DiscretizedGraph
+from ddd_snd.snd.time_expansion import DiscretizedGraph
 import rustworkx as rx
 from pathlib import Path
 import pytest

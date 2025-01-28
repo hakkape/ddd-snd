@@ -1,12 +1,12 @@
-from .instance import Instance
-from .solution import Solution
-from .snd_model import build_snd_model, get_solution
+from ..instance import Instance
+from ..solution import Solution
+from .model import build_snd_model, get_solution
 from .time_expansion import (
     create_relaxed_initial_discretization,
     create_regular_discretization,
     DiscretizedGraph,
 )
-from .discretization_discovery import (
+from ..discretization_discovery import (
     setup_identification_model,
     update_timed_services,
     find_nodes_to_insert,

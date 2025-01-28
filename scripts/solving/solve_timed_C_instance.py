@@ -4,7 +4,7 @@ import argparse
 import os, glob
 from pathlib import Path
 from ddd_snd.instance import read_modified_dow_instance, Instance
-from ddd_snd.solver import solve_csnd, solve_snd
+from ddd_snd.snd.solver import solve_csnd, solve_snd
 
 
 # Define here the functionality of the script
