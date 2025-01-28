@@ -3,14 +3,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from math import ceil, floor
 
+# === SND instance data structures, necessary for implementation of Boland et al. ===
+
 
 @dataclass
 class NodeData:
+    id: int  # node id, also reference used by rustworkx (i.e., can be used in subgraphs to reference main graph nodes)
     name: str
 
 
 @dataclass
 class ArcData:
+    id: int  # ard id, also reference used by rustworkx (i.e., can be used in subgraphs to reference main graph arcs)
     travel_time: int
     flow_cost: float  # flow cost per unit of flow
     fixed_cost: float  # fixed cost per multiple of capacity
@@ -40,8 +44,11 @@ def read_modified_dow_instance(path: Path, delta_t: float) -> Instance:
         lines = f.readlines()
     n_nodes, n_arcs, n_commodities = map(int, lines[1].split())
     flat_graph = rx.PyDiGraph()
+    node_id = 0
     for i in range(1, n_nodes + 1):
-        flat_graph.add_node(NodeData(name=i))
+        flat_graph.add_node(NodeData(id=node_id, name=i))
+        node_id += 1
+    arc_id = 0
     for i, line in enumerate(lines[2 : n_arcs + 2]):
         i, j, flow_cost, capacity, fixed_cost, travel_time = map(
             float, line.split()[:6]
@@ -50,8 +57,9 @@ def read_modified_dow_instance(path: Path, delta_t: float) -> Instance:
         flat_graph.add_edge(
             int(i) - 1,
             int(j) - 1,
-            ArcData(travel_time, flow_cost, fixed_cost, capacity),
+            ArcData(arc_id, travel_time, flow_cost, fixed_cost, capacity),
         )
+        arc_id += 1
     commodities = []
     for line in lines[n_arcs + 2 :]:
         source_node, sink_node, quantity, release, deadline = line.split()[:5]

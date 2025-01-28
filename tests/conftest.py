@@ -27,17 +27,17 @@ def tiny_instance() -> Instance:
         id=2, source_node=0, sink_node=1, quantity=1, release=1, deadline=2
     )
     flat_graph = rx.PyDiGraph()
-    flat_graph.add_node(NodeData(name=1))
-    flat_graph.add_node(NodeData(name=2))
-    flat_graph.add_node(NodeData(name=3))
+    flat_graph.add_node(NodeData(id=0, name=1))
+    flat_graph.add_node(NodeData(id=1, name=2))
+    flat_graph.add_node(NodeData(id=2, name=3))
     flat_graph.add_edge(
-        0, 1, ArcData(travel_time=1, flow_cost=1, fixed_cost=1, capacity=2)
+        0, 1, ArcData(id=0, travel_time=1, flow_cost=1, fixed_cost=1, capacity=2)
     )
     flat_graph.add_edge(
-        1, 2, ArcData(travel_time=1, flow_cost=1, fixed_cost=1, capacity=2)
+        1, 2, ArcData(id=1, travel_time=1, flow_cost=1, fixed_cost=1, capacity=2)
     )
     flat_graph.add_edge(
-        0, 2, ArcData(travel_time=1, flow_cost=2, fixed_cost=2, capacity=2)
+        0, 2, ArcData(id=2, travel_time=1, flow_cost=2, fixed_cost=2, capacity=2)
     )
     return Instance(flat_graph, [com1, com2, com3])
 

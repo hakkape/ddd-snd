@@ -65,21 +65,14 @@ class DiscretizedGraph:
     def _add_holding_arcs(self):
         # add holding arcs
         holding_arc_data = ArcData(
-            travel_time=0, flow_cost=0, fixed_cost=0, capacity=None
+            id=0, travel_time=0, flow_cost=0, fixed_cost=0, capacity=None
         )
         for node in self.g_flat.node_indices():
             expanded_nodes = self.flat_to_expanded_nodes[node]
             holding_arcs = zip(expanded_nodes[:-1], expanded_nodes[1:])
-            self.g_disc.add_edges_from(
-                [
-                    (
-                        i,
-                        j,
-                        holding_arc_data,
-                    )
-                    for i, j in holding_arcs
-                ]
-            )
+            for i, j in holding_arcs:
+                arc_id = self.g_disc.add_edge(i, j, holding_arc_data)
+                self.get_edge_data_by_index(arc_id).id = arc_id
 
     # add arcs between nodes
     def _add_travel_arcs(self):
@@ -156,13 +149,19 @@ class DiscretizedGraph:
         self, new_node: int, previous_node: int, next_node: int | None
     ):
         # add new holding arc to new node
-        self.g_disc.add_edge(previous_node, new_node, ArcData(0, 0, 0, None))
+        arc_id = self.g_disc.add_edge(
+            previous_node, new_node, ArcData(0, 0, 0, 0, None)
+        )
+        self.get_edge_data_by_index(arc_id).id = arc_id
         # if next node exists, move holding arc
         if next_node is not None:
             # remove old holding arc
             holding_arc = get_edge_index(self.g_disc, previous_node, next_node)
             self.g_disc.remove_edge_from_index(holding_arc)
-            self.g_disc.add_edge(new_node, next_node, ArcData(0, 0, 0, None))
+            arc_id = self.g_disc.add_edge(
+                new_node, next_node, ArcData(0, 0, 0, 0, None)
+            )
+            self.get_edge_data_by_index(arc_id).id = arc_id
 
     def _add_travel_arcs_new_node(self, new_node: int):
         # get arcs outgoing from the corresponding flat node
