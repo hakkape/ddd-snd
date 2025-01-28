@@ -26,36 +26,36 @@ class TimeNodeData:
         self.name = f"{flat_node_data.name}_{self.time}"
 
 
-class DiscretizedGraph(rx.PyDiGraph):
-    # for some god-forsaken reason using the rustworkx interface we can not easily inherit from the PyDiGraph class
-    # instead we could use composition or use this workaround using __new__ instead of __init__, see here
-    # https://stackoverflow.com/questions/78593608/subclass-super-init-args-kwargs-not-working-says-object-init-t
-    def __new__(
-        cls, graph: rx.PyDiGraph, node_to_times: list[list[int]], relaxed: bool
+class DiscretizedGraph:
+    def __init__(
+        self, flat_graph: rx.PyDiGraph, node_to_times: list[list[int]], relaxed: bool
     ):
-        new_graph = rx.PyDiGraph.__new__(cls)
-        new_graph.node_to_times = node_to_times
-        new_graph.flat_to_expanded_nodes = {}
-        new_graph.flat_to_expanded_arcs = {}
-        new_graph.g_flat = graph
-        new_graph.relaxed = relaxed
-        new_graph._create_time_expanded_graph()
-        return new_graph
+        self.g_disc = rx.PyDiGraph()
+        self.node_to_times = node_to_times
+        self.flat_to_expanded_nodes = {}
+        self.flat_to_expanded_arcs = {}
+        self.g_flat = flat_graph
+        self.relaxed = relaxed
+        self._create_time_expanded_graph()
 
     # workaround to get IDs of ingoing and outgoing edges, not something that PyDiGraph provides
     def get_out_edge_indices(self, node: int):
-        return self.incident_edges(node)
+        return self.g_disc.incident_edges(node)
 
     def get_in_edge_indices(self, node: int):
-        all_incident_edges = self.incident_edges(node, all_edges=True)
-        return [edge for edge in all_incident_edges if self.get_edge_endpoints_by_index(edge)[1] == node]
+        all_incident_edges = self.g_disc.incident_edges(node, all_edges=True)
+        return [
+            edge
+            for edge in all_incident_edges
+            if self.g_disc.get_edge_endpoints_by_index(edge)[1] == node
+        ]
 
     def _add_timed_nodes(self):
         # add node for each timepoint
         for node in self.g_flat.node_indices():
             self.flat_to_expanded_nodes[node] = []
             for time in self.node_to_times[node]:
-                id_ex = self.add_node(
+                id_ex = self.g_disc.add_node(
                     TimeNodeData(
                         flat_node=node, time=time, flat_node_data=self.g_flat[node]
                     )
@@ -70,7 +70,7 @@ class DiscretizedGraph(rx.PyDiGraph):
         for node in self.g_flat.node_indices():
             expanded_nodes = self.flat_to_expanded_nodes[node]
             holding_arcs = zip(expanded_nodes[:-1], expanded_nodes[1:])
-            self.add_edges_from(
+            self.g_disc.add_edges_from(
                 [
                     (
                         i,
@@ -93,11 +93,11 @@ class DiscretizedGraph(rx.PyDiGraph):
             end_node_index = 0
             # from every start node, connect to last possible end node
             for start_node in potential_start_nodes:
-                start_time = self[start_node].time
+                start_time = self.g_disc[start_node].time
                 # find latest node whose time is not higher than the arrival time
                 while (
                     end_node_index + 1 < len(potential_end_nodes)
-                    and self[potential_end_nodes[end_node_index + 1]].time
+                    and self.g_disc[potential_end_nodes[end_node_index + 1]].time
                     <= start_time + travel_time
                 ):
                     end_node_index += 1
@@ -106,7 +106,7 @@ class DiscretizedGraph(rx.PyDiGraph):
                 # if not relaxed, we need to check if we need to round up to the next node
                 if not self.relaxed:
                     if (
-                        self[potential_end_nodes[end_node_index]].time
+                        self.g_disc[potential_end_nodes[end_node_index]].time
                         != start_time + travel_time
                     ):
                         offset = 1
@@ -117,7 +117,7 @@ class DiscretizedGraph(rx.PyDiGraph):
                 # add arc between start and end node
                 end_node = potential_end_nodes[end_node_index + offset]
 
-                arc_ex = self.add_edge(start_node, end_node, arc_data)
+                arc_ex = self.g_disc.add_edge(start_node, end_node, arc_data)
                 self.flat_to_expanded_arcs[arc].append(arc_ex)
 
     def _create_time_expanded_graph(self):
@@ -127,43 +127,49 @@ class DiscretizedGraph(rx.PyDiGraph):
 
     def _shorten_travel_arcs_unrelaxed(self, new_node: int, next_node: int, time: int):
         # shorten ingoing travel arcs of after node
-        ingoing_arcs = self.in_edges(
+        ingoing_arcs = self.g_disc.in_edges(
             next_node
         )  # returns tuples of form (predecessor_index, node_index, data)
         # if this arc arrives between the time of the new and the after node, we can delete it and replace it by an arc to the new node
         for i, j, data in ingoing_arcs:
             # skip holding arcs
-            if self[i].flat_node == self[j].flat_node:
+            if self.g_disc[i].flat_node == self.g_disc[j].flat_node:
                 continue
-            arrival_time = self[i].time + data.travel_time
-            after_time = self[next_node].time
+            arrival_time = self.g_disc[i].time + data.travel_time
+            after_time = self.g_disc[next_node].time
             if arrival_time < after_time and arrival_time >= time:
-                flat_arc = get_edge_index(self.g_flat, self[i].flat_node, self[j].flat_node)
+                flat_arc = get_edge_index(
+                    self.g_flat, self.g_disc[i].flat_node, self.g_disc[j].flat_node
+                )
                 # remove old edge
-                arc_to_remove = get_edge_index(self, i, j)
-                self.remove_edge_from_index(arc_to_remove)  # from graph
-                self.flat_to_expanded_arcs[flat_arc].remove(arc_to_remove)  # from mapping
+                arc_to_remove = get_edge_index(self.g_disc, i, j)
+                self.g_disc.remove_edge_from_index(arc_to_remove)  # from graph
+                self.flat_to_expanded_arcs[flat_arc].remove(
+                    arc_to_remove
+                )  # from mapping
 
                 # add new edge
-                new_arc = self.add_edge(i, new_node, data)  # to graph
+                new_arc = self.g_disc.add_edge(i, new_node, data)  # to graph
                 self.flat_to_expanded_arcs[flat_arc].append(new_arc)  # to mapping
 
-    def _refine_holding_arc(self, new_node: int, previous_node: int, next_node: int | None):
+    def _refine_holding_arc(
+        self, new_node: int, previous_node: int, next_node: int | None
+    ):
         # add new holding arc to new node
-        self.add_edge(previous_node, new_node, ArcData(0, 0, 0, None))
+        self.g_disc.add_edge(previous_node, new_node, ArcData(0, 0, 0, None))
         # if next node exists, move holding arc
         if next_node is not None:
             # remove old holding arc
-            holding_arc = get_edge_index(self, previous_node, next_node)
-            self.remove_edge_from_index(holding_arc)
-            self.add_edge(new_node, next_node, ArcData(0, 0, 0, None))
+            holding_arc = get_edge_index(self.g_disc, previous_node, next_node)
+            self.g_disc.remove_edge_from_index(holding_arc)
+            self.g_disc.add_edge(new_node, next_node, ArcData(0, 0, 0, None))
 
     def _add_travel_arcs_new_node(self, new_node: int):
         # get arcs outgoing from the corresponding flat node
-        flat_node = self[new_node].flat_node
+        flat_node = self.g_disc[new_node].flat_node
         outgoing_arcs = self.g_flat.out_edges(flat_node)
         for i, j, data in outgoing_arcs:
-            arrival_time = self[new_node].time + data.travel_time
+            arrival_time = self.g_disc[new_node].time + data.travel_time
             # find first expanded node for flat node j that has a time no earlier than the arrival time
             k_j = bisect_left(self.node_to_times[j], arrival_time)
             no_larger_node = k_j == len(self.node_to_times[j])
@@ -175,17 +181,17 @@ class DiscretizedGraph(rx.PyDiGraph):
                     j_ex = self.flat_to_expanded_nodes[j][-1]
                 # if there is a larger or equal node, check
                 # if we hit exactly, use this node, if not, use the previous one
-                else: 
+                else:
                     j_ex = self.flat_to_expanded_nodes[j][k_j]
-                    if self[j_ex].time != arrival_time:
+                    if self.g_disc[j_ex].time != arrival_time:
                         j_ex = self.flat_to_expanded_nodes[j][k_j - 1]
             else:
                 if no_larger_node:
-                    continue # we do not add arcs to nodes that are outside the time horizon
+                    continue  # we do not add arcs to nodes that are outside the time horizon
                 j_ex = self.flat_to_expanded_nodes[j][k_j]
 
             # add new travel arc
-            new_arc = self.add_edge(new_node, j_ex, data)  # to graph
+            new_arc = self.g_disc.add_edge(new_node, j_ex, data)  # to graph
             flat_arc = get_edge_index(self.g_flat, flat_node, j)
             self.flat_to_expanded_arcs[flat_arc].append(new_arc)  # to mapping
 
@@ -194,22 +200,24 @@ class DiscretizedGraph(rx.PyDiGraph):
     ):
         # find all arcs going into the previous node
         # if they arrive no earlier than the new node, we replace them by arcs to the new node
-        ingoing_arcs = self.in_edges(previous_node)
+        ingoing_arcs = self.g_disc.in_edges(previous_node)
         for i, j, data in ingoing_arcs:
             # skip holding arcs
-            if self[i].flat_node == self[j].flat_node:
+            if self.g_disc[i].flat_node == self.g_disc[j].flat_node:
                 continue
-            arrival_time = self[i].time + data.travel_time
+            arrival_time = self.g_disc[i].time + data.travel_time
             if arrival_time >= time:
-                flat_arc = get_edge_index(self.g_flat, self[i].flat_node, self[j].flat_node)
+                flat_arc = get_edge_index(
+                    self.g_flat, self.g_disc[i].flat_node, self.g_disc[j].flat_node
+                )
                 # remove old edge
-                arc_to_remove = get_edge_index(self, i, previous_node)
+                arc_to_remove = get_edge_index(self.g_disc, i, previous_node)
                 self.flat_to_expanded_arcs[flat_arc].remove(
                     arc_to_remove
                 )  # from mapping
-                self.remove_edge_from_index(arc_to_remove)  # from graph
+                self.g_disc.remove_edge_from_index(arc_to_remove)  # from graph
                 # add new edge
-                new_arc = self.add_edge(i, new_node, data)  # to graph
+                new_arc = self.g_disc.add_edge(i, new_node, data)  # to graph
                 self.flat_to_expanded_arcs[flat_arc].append(new_arc)  # to mapping
 
     def refine_discretization(self, flat_node: int, time: int):
@@ -222,16 +230,18 @@ class DiscretizedGraph(rx.PyDiGraph):
         previous_node = self.flat_to_expanded_nodes[flat_node][k_previous]
         # next node after insertion still has k_new as index since new node has not been added yet
         # it can also be that the new node we add is later than the last time point, in which case next_node is None
-        next_node = self.flat_to_expanded_nodes[flat_node][
-            k_new
-        ] if k_new < len(self.node_to_times[flat_node]) else None
+        next_node = (
+            self.flat_to_expanded_nodes[flat_node][k_new]
+            if k_new < len(self.node_to_times[flat_node])
+            else None
+        )
 
         # insert time point into list of time points for node
         self.node_to_times[flat_node].insert(k_new, time)
 
         # update the graph
         # add new node
-        new_node = self.add_node(
+        new_node = self.g_disc.add_node(
             TimeNodeData(
                 flat_node=flat_node, time=time, flat_node_data=self.g_flat[flat_node]
             )
@@ -245,6 +255,34 @@ class DiscretizedGraph(rx.PyDiGraph):
         else:
             if next_node is not None:
                 self._shorten_travel_arcs_unrelaxed(new_node, next_node, time)
+
+    # pass through of graph methods
+    def num_nodes(self):
+        return self.g_disc.num_nodes()
+
+    def num_edges(self):
+        return self.g_disc.num_edges()
+
+    def __getitem__(self, node: int):
+        return self.g_disc[node]
+
+    def __setitem__(self, node: int, data):
+        self.g_disc[node] = data
+
+    def edge_indices_from_endpoints(self, i, j):
+        return self.g_disc.edge_indices_from_endpoints(i, j)
+
+    def node_indices(self):
+        return self.g_disc.node_indices()
+
+    def edge_indices(self):
+        return self.g_disc.edge_indices()
+
+    def get_edge_endpoints_by_index(self, edge):
+        return self.g_disc.get_edge_endpoints_by_index(edge)
+
+    def get_edge_data_by_index(self, edge):
+        return self.g_disc.get_edge_data_by_index(edge)
 
 
 def create_regular_discretization(
